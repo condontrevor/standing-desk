@@ -1,127 +1,130 @@
+#include <NewPing.h>
+
+/*
+ * Logic:
+ *    1. read distance from ground
+ *    2. read buttons, determine direction of travel
+ *    3. if direction of travel changed from previous, set motion direction
+ *    4. if motion direction, set motors appropriately
+ *    5. once distance threshold is hit set motion to idle and stop motor
+ *    
+ */
+
 #include "lib/button.h"
-#define echoPin 2 // attach pin D2 Arduino to pin Echo of HC-SR04
-#define trigPin 3 //attach pin D3 Arduino to pin Trig of HC-SR04
+#define ECHO_PIN 2
+#define TRIGGER_PIN 3 
+#define MAX_DISTANCE 200
+
+#define BUTTON_1_PIN 4
+#define BUTTON_2_PIN 5
+
+#define DEBUG
+#define DEBUG_LED_1 6
+#define DEBUG_LED_2 7
 
 enum DesiredState {SIT, STAND};
-enum MotionState {IDLED, MOVING};
-enum MotorDirection {UP, DOWN};
+enum MotorDirection {STOP, UP, DOWN};
 
 DesiredState desired = SIT;
-MotionState motion = IDLED;
-MotorDirection motor_direction = UP;
-
-// defines variables
-long duration; // variable for the duration of sound wave travel
-int distance; // variable for the distance measurement
+MotorDirection motor_direction = STOP;
 
 Button button_1;
 Button button_2;
 
-const int numReadings = 20;
-int readings[numReadings];
+unsigned long distance;
+const int num_readings = 20;
+unsigned long readings[num_readings];
 int readIndex = 0;
-int total = 0;
-int average = 0;
+unsigned long total = 0;
+unsigned long average = 0;
 
-const int THRESHOLD = 10; // cm
-int sitting_height = 30; // ??
-int standing_height = 60; // ??
+NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
 
+const int THRESHOLD = 3;
+const int DISTANCE_DELTA_ALLOWED = 60;
+int sitting_height = 86;
+int standing_height = 120;
+int desired_height = sitting_height;
 
 void setup() {
-  pinMode(trigPin, OUTPUT); // Sets the trigPin as an OUTPUT
-  pinMode(echoPin, INPUT); // Sets the echoPin as an INPUT
-  Serial.begin(9600); // // Serial Communication is starting with 9600 of baudrate speed
-  Serial.println("Ultrasonic Sensor HC-SR04 Test"); // print some text in Serial Monitor
-  Serial.println("with Arduino UNO R3");
-  button_1.begin(4);
-  button_2.begin(5);
+  pinMode(BUTTON_1_PIN, INPUT);
+  pinMode(BUTTON_2_PIN, INPUT);
+#ifdef DEBUG
+  pinMode(DEBUG_LED_1, OUTPUT); 
+  pinMode(DEBUG_LED_2, OUTPUT);
+#endif
+  Serial.begin(115200); // // Serial Communication is starting with 9600 of baudrate speed
+  button_1.begin(BUTTON_1_PIN);
+  button_2.begin(BUTTON_2_PIN);
+  Serial.println("STANDING DESK!");
 }
 
+bool good_reading = false;
 // Running average
 void read_distance() {
-  // Measure distance
-  digitalWrite(trigPin, LOW);
-  delayMicroseconds(2);
-  digitalWrite(trigPin, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
-  duration = pulseIn(echoPin, HIGH);
-
-  // Update measurement array
+  // Throw away bad measurements, calcuate the current average 
+  distance = sonar.ping_cm();
+  if (distance == 0) {
+    good_reading = false;
+    return;
+  }
+  good_reading = true;
   total = total - readings[readIndex];
-  readings[readIndex] = duration * 0.034 / 2;
+  readings[readIndex] = distance;
   total = total + readings[readIndex];
   readIndex = readIndex + 1;
-  if (readIndex >= numReadings) {readIndex = 0;}
-
-  // Calculate the average
-  distance = total / numReadings;
+  if (readIndex >= num_readings) {readIndex = 0;}
+  distance = total / num_readings;
 }
 
 void loop() {
   read_distance();
-
-  // check buttons, update state machine
-  if (button_1.debounce()) {
-    digitalWrite(LED_BUILTIN, HIGH);
-    if (desired == SIT) {
-      desired = STAND;
-      motion = MOVING;
-    }
-  }
-  if (button_2.debounce()) {
-    digitalWrite(LED_BUILTIN, LOW);
-    if (desired == STAND) {
-      desired = SIT;
-      motion = MOVING;
-    }
-  }
- 
-  // check distance, update state machine
-  if (desired == STAND && motion == MOVING) {
-    if (abs(standing_height - distance) < THRESHOLD) {
-      motion = IDLED;
-    }
-    else {
-      if (standing_height > distance) {
-        motor_direction = UP;
-      }
-      else {
-        motor_direction = DOWN;
-      }
-    }
-  }
-
-  // check distance, update state machine
-  if (desired == SIT && motion == MOVING) {
-    if (abs(sitting_height - distance) < THRESHOLD) {
-      motion = IDLED;
-    }
-    else {
-      if (standing_height > distance) {
-        motor_direction = UP;
-      }
-      else {
-        motor_direction = DOWN;
-      }
-    }
-  }
-
-  // change state of motors based on state machine
-  if (motion == MOVING) {
-    if (motor_direction == UP) {
-      // CLEAR THE MOTOR DOWN PIN
-      // SET THE MOTOR UP PIN
-    }
-    else {
-      // CLEAR THE MOTOR UP PIN
-      // SET THE MOTOR DOWN PIN
-    }
-  }
-  else {
-    // CLEAR THE MOTOR UP PIN
-    // CLEAR THE MOTOR DOWN PIN
+  if (!good_reading) {
+    motor_direction = STOP;
+    digitalWrite(debugLED1, LOW);
+    digitalWrite(debugLED2, LOW);
+    Serial.println("bad reading");
+    return;
   }
   
+  // check buttons, update state machine
+  if (button_2.debounce()) {
+    Serial.println("button pushed");
+    if (desired == STAND) {
+      desired = SIT;
+      motor_direction = DOWN;
+      desired_height = sitting_height;
+    }
+    else {
+      desired = STAND;
+      motor_direction = UP;
+      desired_height = standing_height;
+    }
+  }
+  Serial.print("distance: ");
+  Serial.print(distance);
+  Serial.print(" desired: ");
+  Serial.print(desired_height);
+  Serial.print(" motor_direction:");
+  Serial.println(motor_direction);
+
+  // check distance, update state machine
+  if (motor_direction == UP || motor_direction == DOWN) {
+    if (abs(desired_height - distance) < THRESHOLD) {
+      motor_direction = STOP;
+      digitalWrite(debugLED1, LOW);
+      digitalWrite(debugLED2, LOW);
+    }
+    else {
+      if (desired_height > distance) {
+        digitalWrite(debugLED1, LOW);
+        digitalWrite(debugLED2, HIGH);
+      }
+      else {
+        digitalWrite(debugLED1, HIGH);
+        digitalWrite(debugLED2, LOW);
+      }
+    }
+  }
+//  delay(10);
 }
