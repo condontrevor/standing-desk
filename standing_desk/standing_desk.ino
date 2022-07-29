@@ -13,8 +13,8 @@ const uint8_t MOD_HS4 = 5;
 const uint8_t MOD_HS1 = 6;
 const uint8_t MOD_HS3 = 8;
 
-const uint8_t MODE_LED = 7;
-const uint8_t TIMER_LED = 9;
+const uint8_t MODE_LED = 9;
+const uint8_t TIMER_LED = 7;
 int TIMER_LED_STATE = LOW;
 
 
@@ -175,19 +175,30 @@ void check_serial() {
   }
 }
 
+int last_target_time = target_time;
 void check_mode() {
   if (random_timer_btn.debounce()) {
-     start_time = millis();
-     TIMER_LED_STATE = LOW;
-     Serial.println("Mode switch");
-     if (timer_state == RANDOM_OFF) {
-       timer_state = RANDOM_ON;
-       digitalWrite(MODE_LED, HIGH);
-     }
-     else if (timer_state == RANDOM_ON) {
-       timer_state = RANDOM_OFF;
-       digitalWrite(MODE_LED, LOW);
-     }
+    int other_start_time = millis();
+    if (other_start_time - start_time < 500) {
+      Serial.println("Double tap");
+      timer_state = RANDOM_ON;
+      digitalWrite(MODE_LED, HIGH);
+      last_target_time = target_time;
+      target_time = 15; // seconds
+      return;
+    }
+    start_time = millis();
+    TIMER_LED_STATE = LOW;
+    Serial.println("Mode switch");
+    if (timer_state == RANDOM_OFF) {
+     timer_state = RANDOM_ON;
+     digitalWrite(MODE_LED, HIGH);
+    }
+    else if (timer_state == RANDOM_ON) {
+     timer_state = RANDOM_OFF;
+     digitalWrite(MODE_LED, LOW);
+     if (target_time == 15) {target_time = last_target_time;}
+    }
   }
 }
 
